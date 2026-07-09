@@ -20,14 +20,24 @@ def add_existing_dll_dirs(paths: list[Path]) -> None:
 def make_core(vs: object) -> object:
     create_environment = getattr(vs, "create_environment", None)
     if create_environment is not None:
-        env = create_environment()
-        return env.get_core()
+        try:
+            env = create_environment()
+            return env.get_core()
+        except Exception:
+            pass
+
+    create_core = getattr(vs, "create_core", None)
+    if create_core is not None:
+        try:
+            return create_core()
+        except Exception:
+            pass
 
     core_type = getattr(vs, "Core", None)
     if core_type is not None:
         try:
             return core_type()
-        except TypeError:
+        except Exception:
             pass
 
     return vs.core

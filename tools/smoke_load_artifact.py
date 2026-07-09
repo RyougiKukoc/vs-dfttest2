@@ -54,8 +54,26 @@ def make_core(vs: object, *, autoload: bool) -> object:
     flags = 0 if autoload else vs.DISABLE_AUTO_LOADING
     create_environment = getattr(vs, "create_environment", None)
     if create_environment is not None:
-        env = create_environment(flags=flags)
-        return env.get_core()
+        for factory in (
+            lambda: create_environment(flags=flags),
+            lambda: create_environment(flags),
+        ):
+            try:
+                env = factory()
+                return env.get_core()
+            except Exception:
+                continue
+
+    create_core = getattr(vs, "create_core", None)
+    if create_core is not None:
+        for factory in (
+            lambda: create_core(flags=flags),
+            lambda: create_core(flags),
+        ):
+            try:
+                return factory()
+            except Exception:
+                continue
 
     core_type = getattr(vs, "Core", None)
     if core_type is not None:
@@ -66,7 +84,7 @@ def make_core(vs: object, *, autoload: bool) -> object:
         ):
             try:
                 return factory()
-            except TypeError:
+            except Exception:
                 continue
 
     return vs.core
