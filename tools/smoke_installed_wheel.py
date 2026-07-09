@@ -98,6 +98,9 @@ def main(argv: list[str]) -> int:
     if args.exercise_cpu_filter:
         try:
             import dfttest2
+            import dfttest2._dfttest2 as helper
+
+            helper.core = core
 
             clip = core.std.BlankClip(format=vs.YUV420P8, width=64, height=32, length=5, color=[96, 128, 128])
             filtered = dfttest2.DFTTest(clip, backend=dfttest2.Backend.CPU())

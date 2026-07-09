@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 PLUGIN_NAME = "dfttest2"
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def resolve_vapoursynth_paths(root: Path | None) -> tuple[list[Path], list[Path]]:
@@ -92,6 +93,9 @@ def make_core(vs: object, *, autoload: bool) -> object:
 
 def exercise_cpu_filter(core: object, vs: object) -> None:
     import dfttest2
+    import dfttest2._dfttest2 as helper
+
+    helper.core = core
 
     clip = core.std.BlankClip(format=vs.YUV420P8, width=64, height=32, length=5, color=[96, 128, 128])
     filtered = dfttest2.DFTTest(clip, backend=dfttest2.Backend.CPU())
@@ -128,6 +132,7 @@ def main(argv: list[str]) -> int:
             return 1
 
     sys_paths, dll_paths = resolve_vapoursynth_paths(vs_root)
+    sys.path.insert(0, str(ROOT))
     for path in reversed(sys_paths):
         if path.exists():
             sys.path.insert(0, str(path))
