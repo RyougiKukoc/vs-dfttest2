@@ -54,19 +54,14 @@ jobs:
         include:
           - variant: cu121
             cuda_version: 12.1.1
-            cuda_component: "12.1"
-            cuda_path: 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1'
           - variant: cu129
             cuda_version: 12.9.1
-            cuda_component: "12.9"
-            cuda_path: 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9'
 
     defaults:
       run:
         shell: cmd
 
     env:
-      CUDA_PATH: ${{ matrix.cuda_path }}
       DFTTEST2_CUDA_VARIANT: ${{ matrix.variant }}
 
     steps:
@@ -87,23 +82,13 @@ jobs:
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Cache CUDA
-        id: cache-cuda
-        uses: actions/cache@v4
-        with:
-          path: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA
-          key: ${{ runner.os }}-cuda-${{ matrix.cuda_version }}-dfttest2-static-nvrtc-v1
-
       - name: Install CUDA ${{ matrix.cuda_version }}
-        if: steps.cache-cuda.outputs.cache-hit != 'true'
-        run: |
-          curl.exe -sS -L -o cuda_installer.exe https://developer.download.nvidia.com/compute/cuda/${{ matrix.cuda_version }}/network_installers/cuda_${{ matrix.cuda_version }}_windows_network.exe
-          cuda_installer.exe -s nvcc_${{ matrix.cuda_component }} cudart_${{ matrix.cuda_component }} crt_${{ matrix.cuda_component }} nvrtc_dev_${{ matrix.cuda_component }} nvptxcompiler_${{ matrix.cuda_component }}
-
-      - name: Add CUDA to PATH
-        run: |
-          echo %CUDA_PATH%\bin>>"%GITHUB_PATH%"
-          echo %CUDA_PATH%\bin\x64>>"%GITHUB_PATH%"
+        uses: Jimver/cuda-toolkit@v0.2.35
+        with:
+          cuda: ${{ matrix.cuda_version }}
+          method: local
+          sub-packages: '["nvcc", "cudart", "nvrtc_dev", "nvptxcompiler"]'
+          log-file-suffix: ${{ matrix.variant }}.txt
 
       - name: Prepare VapourSynth R77 wheel
         run: >-
