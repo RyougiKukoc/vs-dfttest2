@@ -17,8 +17,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include <VapourSynth.h>
-#include <VSHelper.h>
+#include <VapourSynth4.h>
+#include <VSHelper4.h>
 
 #include "dfttest2_cpu.h"
 #include "kernel.hpp"
@@ -56,18 +56,6 @@ static void dft(
 }
 
 
-static void VS_CC DFTTestInit(
-    VSMap *in, VSMap *out, void **instanceData, VSNode *node,
-    VSCore *core, const VSAPI *vsapi
-) noexcept {
-
-    auto d = static_cast<const DFTTestData *>(*instanceData);
-
-    auto vi = vsapi->getVideoInfo(d->node);
-    vsapi->setVideoInfo(vi, 1, node);
-}
-
-
 static void VS_CC DFTTestFree(
     void *instanceData, VSCore *core, const VSAPI *vsapi
 ) noexcept {
@@ -92,28 +80,28 @@ static void VS_CC DFTTestCreate(
 
     auto d = std::make_unique<DFTTestData>();
 
-    d->node = vsapi->propGetNode(in, "clip", 0, nullptr);
+    d->node = vsapi->mapGetNode(in, "clip", 0, nullptr);
 
     auto set_error = [vsapi, out, &d](const char * error_message) -> void {
         vsapi->freeNode(d->node);
-        vsapi->setError(out, error_message);
+        vsapi->mapSetError(out, error_message);
         return ;
     };
 
     auto vi = vsapi->getVideoInfo(d->node);
-    if (!isConstantFormat(vi)) {
+    if (!vsh::isConstantVideoFormat(vi)) {
         return set_error("only constant format input is supported");
     }
-    if (vi->format->sampleType == stInteger && vi->format->bytesPerSample > 2) {
+    if (vi->format.sampleType == stInteger && vi->format.bytesPerSample > 2) {
         return set_error("only 8-16 bit integer format input is supported");
     }
-    if (vi->format->sampleType == stFloat && vi->format->bitsPerSample != 32) {
+    if (vi->format.sampleType == stFloat && vi->format.bitsPerSample != 32) {
         return set_error("only 32-bit float format input is supported");
     }
 
     int error;
 
-    d->radius = int64ToIntS(vsapi->propGetInt(in, "radius", 0, &error));
+    d->radius = vsh::int64ToIntS(vsapi->mapGetInt(in, "radius", 0, &error));
     if (error) {
         d->radius = 0;
     }
@@ -122,7 +110,7 @@ static void VS_CC DFTTestCreate(
         return set_error("\"radius\" must be in [0, 1, 2, 3]");
     }
 
-    d->block_size = int64ToIntS(vsapi->propGetInt(in, "block_size", 0, &error));
+    d->block_size = vsh::int64ToIntS(vsapi->mapGetInt(in, "block_size", 0, &error));
     if (error) {
         d->block_size = 16;
     }
@@ -131,17 +119,17 @@ static void VS_CC DFTTestCreate(
         return set_error("\"block_size\" must be 16");
     }
 
-    d->block_step = int64ToIntS(vsapi->propGetInt(in, "block_step", 0, &error));
+    d->block_step = vsh::int64ToIntS(vsapi->mapGetInt(in, "block_step", 0, &error));
     if (error) {
         d->block_step = d->block_size;
     }
 
-    int num_planes_args = vsapi->propNumElements(in, "planes");
+    int num_planes_args = vsapi->mapNumElements(in, "planes");
     d->process.fill(num_planes_args <= 0);
     for (int i = 0; i < num_planes_args; ++i) {
-        int plane = static_cast<int>(vsapi->propGetInt(in, "planes", i, nullptr));
+        int plane = static_cast<int>(vsapi->mapGetInt(in, "planes", i, nullptr));
 
-        if (plane < 0 || plane >= vi->format->numPlanes) {
+        if (plane < 0 || plane >= vi->format.numPlanes) {
             return set_error("plane index out of range");
         }
 
@@ -153,7 +141,7 @@ static void VS_CC DFTTestCreate(
     }
 
     {
-        auto ptr = vs_aligned_malloc<float>(
+        auto ptr = vsh::vsh_aligned_malloc<float>(
             (2 * d->radius + 1) * d->block_size * d->block_size * sizeof(float),
             64
         );
@@ -163,7 +151,7 @@ static void VS_CC DFTTestCreate(
         d->window.reset(ptr);
     }
     {
-        auto window = vsapi->propGetFloatArray(in, "window", nullptr);
+        auto window = vsapi->mapGetFloatArray(in, "window", nullptr);
         for (int i = 0; i < (2 * d->radius + 1) * d->block_size * d->block_size / 16; i++) {
             to_float(Vec8d().load(&window[i * 16])).store_a(&d->window[i * 16]);
             to_float(Vec8d().load(&window[i * 16 + 8])).store_a(&d->window[i * 16 + 8]);
@@ -171,7 +159,7 @@ static void VS_CC DFTTestCreate(
     }
 
     {
-        auto ptr = vs_aligned_malloc<float>(
+        auto ptr = vsh::vsh_aligned_malloc<float>(
             (2 * d->radius + 1) * d->block_size * (d->block_size / 2 + 1 + 15) * sizeof(float),
             64
         );
@@ -181,7 +169,7 @@ static void VS_CC DFTTestCreate(
         d->sigma.reset(ptr);
     }
     {
-        auto sigma = vsapi->propGetFloatArray(in, "sigma", nullptr);
+        auto sigma = vsapi->mapGetFloatArray(in, "sigma", nullptr);
         for (int i = 0; i < (2 * d->radius + 1) * d->block_size; i++) {
             float sigma_padded[16] {};
             for (int j = 0; j < d->block_size / 2 + 1; j++) {
@@ -191,19 +179,19 @@ static void VS_CC DFTTestCreate(
         }
     }
 
-    d->sigma2 = static_cast<float>(vsapi->propGetFloat(in, "sigma2", 0, nullptr));
-    d->pmin = static_cast<float>(vsapi->propGetFloat(in, "pmin", 0, nullptr));
-    d->pmax = static_cast<float>(vsapi->propGetFloat(in, "pmax", 0, nullptr));
+    d->sigma2 = static_cast<float>(vsapi->mapGetFloat(in, "sigma2", 0, nullptr));
+    d->pmin = static_cast<float>(vsapi->mapGetFloat(in, "pmin", 0, nullptr));
+    d->pmax = static_cast<float>(vsapi->mapGetFloat(in, "pmax", 0, nullptr));
 
-    d->filter_type = static_cast<int>(vsapi->propGetInt(in, "filter_type", 0, nullptr));
+    d->filter_type = static_cast<int>(vsapi->mapGetInt(in, "filter_type", 0, nullptr));
 
-    d->zero_mean = !!vsapi->propGetInt(in, "zero_mean", 0, &error);
+    d->zero_mean = !!vsapi->mapGetInt(in, "zero_mean", 0, &error);
     if (error) {
         d->zero_mean = true;
     }
     if (d->zero_mean) {
         {
-            auto ptr = vs_aligned_malloc<float>(
+            auto ptr = vsh::vsh_aligned_malloc<float>(
                 (2 * d->radius + 1) * d->block_size * (d->block_size / 2 + 1 + 15) * 2 * sizeof(float),
                 64
             );
@@ -212,7 +200,7 @@ static void VS_CC DFTTestCreate(
             }
             d->window_freq.reset(ptr);
         }
-        auto window_freq = vsapi->propGetFloatArray(in, "window_freq", nullptr);
+        auto window_freq = vsapi->mapGetFloatArray(in, "window_freq", nullptr);
         for (int i = 0; i < (2 * d->radius + 1) * d->block_size; i++) {
             float sigma_padded[32] {};
             for (int j = 0; j < d->block_size / 2 + 1; j++) {
@@ -225,22 +213,24 @@ static void VS_CC DFTTestCreate(
     }
 
     VSCoreInfo info;
-    vsapi->getCoreInfo2(core, &info);
+    vsapi->getCoreInfo(core, &info);
     d->num_uninitialized_threads.store(info.numThreads, std::memory_order::relaxed);
     d->thread_data.reserve(info.numThreads);
+
+    VSFilterDependency deps[] = {{d->node, rpGeneral}};
 
 #ifndef HAS_DISPATCH
     if (!supported_arch()) {
         return set_error("unsupported cpu architecture");
     }
 
-    vsapi->createFilter(
-        in, out, "DFTTest",
-        DFTTestInit, DFTTestGetFrame, DFTTestFree,
-        fmParallel, 0, d.release(), core
+    vsapi->createVideoFilter(
+        out, "DFTTest", vi,
+        DFTTestGetFrame, DFTTestFree,
+        fmParallel, deps, 1, d.release(), core
     );
 #else
-    auto opt = int64ToIntS(vsapi->propGetInt(in, "opt", 0, &error));
+    auto opt = vsh::int64ToIntS(vsapi->mapGetInt(in, "opt", 0, &error));
     if (error) {
         opt = 0;
     }
@@ -254,10 +244,10 @@ static void VS_CC DFTTestCreate(
 
         for (int i = static_cast<int>(getframe_candidates.size()) - 1; i >= 0; i--) {
             if (supported_arch_candidates[i]()) {
-                vsapi->createFilter(
-                    in, out, "DFTTest",
-                    DFTTestInit, getframe_candidates[i], DFTTestFree,
-                    fmParallel, 0, d.release(), core
+                vsapi->createVideoFilter(
+                    out, "DFTTest", vi,
+                    getframe_candidates[i], DFTTestFree,
+                    fmParallel, deps, 1, d.release(), core
                 );
 
                 found_supported_impl = true;
@@ -270,10 +260,10 @@ static void VS_CC DFTTestCreate(
         }
     } else {
         if (0 < opt && opt < static_cast<int>(getframe_candidates.size() + 1)) {
-            vsapi->createFilter(
-                in, out, "DFTTest",
-                DFTTestInit, getframe_candidates[opt - 1], DFTTestFree,
-                fmParallel, 0, d.release(), core
+            vsapi->createVideoFilter(
+                out, "DFTTest", vi,
+                getframe_candidates[opt - 1], DFTTestFree,
+                fmParallel, deps, 1, d.release(), core
             );
         } else {
             return set_error("invalid \"opt\"");
@@ -289,19 +279,19 @@ static void VS_CC RDFT(
 ) noexcept {
 
     auto set_error = [vsapi, out](const char * error_message) -> void {
-        vsapi->setError(out, error_message);
+        vsapi->mapSetError(out, error_message);
     };
 
-    int ndim = vsapi->propNumElements(in, "shape");
+    int ndim = vsapi->mapNumElements(in, "shape");
     if (ndim != 1 && ndim != 2 && ndim != 3) {
         return set_error("\"shape\" must be an array of ints with 1, 2 or 3 values");
     }
 
     std::array<int, 3> shape {};
     {
-        auto shape_array = vsapi->propGetIntArray(in, "shape", nullptr);
+        auto shape_array = vsapi->mapGetIntArray(in, "shape", nullptr);
         for (int i = 0; i < ndim; i++) {
-            shape[i] = int64ToIntS(shape_array[i]);
+            shape[i] = vsh::int64ToIntS(shape_array[i]);
         }
     }
 
@@ -309,7 +299,7 @@ static void VS_CC RDFT(
     for (int i = 0; i < ndim; i++) {
         size *= shape[i];
     }
-    if (vsapi->propNumElements(in, "data") != size) {
+    if (vsapi->mapNumElements(in, "data") != size) {
         return set_error("cannot reshape array");
     }
 
@@ -318,13 +308,13 @@ static void VS_CC RDFT(
         complex_size *= shape[i];
     }
 
-    auto input = vsapi->propGetFloatArray(in, "data", nullptr);
+    auto input = vsapi->mapGetFloatArray(in, "data", nullptr);
 
     auto output = std::make_unique<std::complex<double> []>(complex_size);
 
     if (ndim == 1) {
         dft(output.get(), input, size, 1);
-        vsapi->propSetFloatArray(out, "ret", (const double *) output.get(), complex_size * 2);
+        vsapi->mapSetFloatArray(out, "ret", (const double *) output.get(), complex_size * 2);
     } else if (ndim == 2) {
         for (int i = 0; i < shape[0]; i++) {
             dft(&output[i * (shape[1] / 2 + 1)], &input[i * shape[1]], shape[1], 1);
@@ -336,7 +326,7 @@ static void VS_CC RDFT(
             dft(&output2[i], &output[i], shape[0], shape[1] / 2 + 1);
         }
 
-        vsapi->propSetFloatArray(out, "ret", (const double *) output2.get(), complex_size * 2);
+        vsapi->mapSetFloatArray(out, "ret", (const double *) output2.get(), complex_size * 2);
     } else {
         for (int i = 0; i < shape[0] * shape[1]; i++) {
             dft(&output[i * (shape[2] / 2 + 1)], &input[i * shape[2]], shape[2], 1);
@@ -359,42 +349,41 @@ static void VS_CC RDFT(
             dft(&output[i], &output2[i], shape[0], shape[1] * (shape[2] / 2 + 1));
         }
 
-        vsapi->propSetFloatArray(out, "ret", (const double *) output.get(), complex_size * 2);
+        vsapi->mapSetFloatArray(out, "ret", (const double *) output.get(), complex_size * 2);
     }
 }
 
 
 static void Version(const VSMap *, VSMap * out, void *, VSCore *, const VSAPI *vsapi) {
-    vsapi->propSetData(out, "version", VERSION, -1, paReplace);
+    vsapi->mapSetData(out, "version", VERSION, -1, dtUtf8, maReplace);
 
 #ifdef HAS_DISPATCH
     constexpr std::array dispatch_targets { "auto", SUPPORTED_ARCH_STRS };
 
     for (int i = 0; i < static_cast<int>(dispatch_targets.size()); i++) {
-        vsapi->propSetData(out, "dispatch_targets", dispatch_targets[i], -1, paAppend);
+        vsapi->mapSetData(out, "dispatch_targets", dispatch_targets[i], -1, dtUtf8, maAppend);
     }
 #else // HAS_DISPATCH
-    vsapi->propSetData(out, "dispatch_targets", target_arch(), -1, paReplace);
+    vsapi->mapSetData(out, "dispatch_targets", target_arch(), -1, dtUtf8, maReplace);
 #endif // HAS_DISPATCH
 }
 
 
-VS_EXTERNAL_API(void) VapourSynthPluginInit(
-    VSConfigPlugin configFunc,
-    VSRegisterFunction registerFunc,
-    VSPlugin *plugin
+VS_EXTERNAL_API(void) VapourSynthPluginInit2(
+    VSPlugin *plugin,
+    const VSPLUGINAPI *vspapi
 ) {
 
-    configFunc(
+    vspapi->configPlugin(
         "io.github.amusementclub.dfttest2_cpu",
         "dfttest2_cpu",
         "DFTTest2 (CPU)",
-        VAPOURSYNTH_API_VERSION, 1, plugin
+        VS_MAKE_VERSION(10, 0), VAPOURSYNTH_API_VERSION, 0, plugin
     );
 
-    registerFunc(
+    vspapi->registerFunction(
         "DFTTest",
-        "clip:clip;"
+        "clip:vnode;"
         "window:float[];"
         "sigma:float[];"
         "sigma2:float;"
@@ -408,19 +397,23 @@ VS_EXTERNAL_API(void) VapourSynthPluginInit(
         "window_freq:float[]:opt;"
         "planes:int[]:opt;"
         "opt:int:opt;",
+        "clip:vnode;",
         DFTTestCreate, nullptr, plugin
     );
 
-    registerFunc(
+    vspapi->registerFunction(
         "RDFT",
         "data:float[];"
         "shape:int[];",
+        "ret:float[];",
         RDFT, nullptr, plugin
     );
 
-    registerFunc(
+    vspapi->registerFunction(
         "Version",
         "",
+        "version:data;"
+        "dispatch_targets:data[];",
         Version, nullptr, plugin
     );
 }

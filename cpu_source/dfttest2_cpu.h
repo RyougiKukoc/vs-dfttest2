@@ -9,14 +9,14 @@
 #include <thread>
 #include <unordered_map>
 
-#include <VapourSynth.h>
-#include <VSHelper.h>
+#include <VapourSynth4.h>
+#include <VSHelper4.h>
 
 #include <vectorclass.h>
 
 
 static inline void vs_aligned_free_float(float * ptr) {
-    vs_aligned_free(static_cast<void *>(ptr));
+    vsh::vsh_aligned_free(static_cast<void *>(ptr));
 }
 
 
@@ -27,7 +27,7 @@ struct DFTTestThreadData {
 
 
 struct DFTTestData {
-    VSNodeRef * node;
+    VSNode * node;
     int radius;
     int block_size;
     int block_step;
@@ -49,8 +49,8 @@ struct DFTTestData {
 #if defined HAS_DISPATCH
 #include <cpu_dispatch.h>
 #else // HAS_DISPATCH
-extern const VSFrameRef *VS_CC DFTTestGetFrame(
-    int n, int activationReason, void **instanceData, void **frameData,
+extern const VSFrame *VS_CC DFTTestGetFrame(
+    int n, int activationReason, void *instanceData, void **frameData,
     VSFrameContext *frameCtx, VSCore *core, const VSAPI *vsapi
 ) noexcept;
 

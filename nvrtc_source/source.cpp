@@ -20,8 +20,8 @@
 #include <utility>
 #include <vector>
 
-#include <VapourSynth.h>
-#include <VSHelper.h>
+#include <VapourSynth4.h>
+#include <VSHelper4.h>
 
 #include <cuda.h>
 #include <nvrtc.h>
@@ -133,7 +133,7 @@ struct context_popper {
 
 struct node_freer {
     const VSAPI * & vsapi;
-    VSNodeRef * node {};
+    VSNode * node {};
     void release() {
         node = nullptr;
     }
@@ -226,7 +226,7 @@ static void reflection_padding_impl(
     int offset_y = (pad_height - height) / 2;
     int offset_x = (pad_width - width) / 2;
 
-    vs_bitblt(
+    vsh::bitblt(
         &dst[offset_y * pad_width + offset_x], pad_width * sizeof(T),
         src, stride * sizeof(T),
         width * sizeof(T), height
@@ -465,7 +465,7 @@ struct DFTTestStreamData {
 
 
 struct DFTTestData {
-    VSNodeRef * node;
+    VSNode * node;
     int radius;
     int block_size;
     int block_step;
@@ -493,23 +493,12 @@ struct DFTTestData {
     std::shared_mutex thread_data_lock;
 };
 
-static void VS_CC DFTTestInit(
-    VSMap *in, VSMap *out, void **instanceData, VSNode *node,
-    VSCore *core, const VSAPI *vsapi
-) noexcept {
-
-    auto d = static_cast<const DFTTestData *>(*instanceData);
-
-    auto vi = vsapi->getVideoInfo(d->node);
-    vsapi->setVideoInfo(vi, 1, node);
-}
-
-static const VSFrameRef *VS_CC DFTTestGetFrame(
-    int n, int activationReason, void **instanceData, void **frameData,
+static const VSFrame *VS_CC DFTTestGetFrame(
+    int n, int activationReason, void *instanceData, void **frameData,
     VSFrameContext *frameCtx, VSCore *core, const VSAPI *vsapi
 ) noexcept {
 
-    auto d = static_cast<DFTTestData *>(*instanceData);
+    auto d = static_cast<DFTTestData *>(instanceData);
 
     if (activationReason == arInitial) {
         int start = std::max(n - d->radius, 0);
@@ -556,7 +545,7 @@ static const VSFrameRef *VS_CC DFTTestGetFrame(
                 (2 * d->radius + 1) *
                 calc_pad_size(vi->height, d->block_size, d->block_step) *
                 calc_pad_size(vi->width, d->block_size, d->block_step) *
-                vi->format->bytesPerSample
+                vi->format.bytesPerSample
             );
 
             checkError(cuMemHostAlloc((void **) &thread_data.h_padded, padded_size, 0));
@@ -570,7 +559,7 @@ static const VSFrameRef *VS_CC DFTTestGetFrame(
         }
     }
 
-    std::vector<std::unique_ptr<const VSFrameRef, decltype(vsapi->freeFrame)>> src_frames;
+    std::vector<std::unique_ptr<const VSFrame, decltype(vsapi->freeFrame)>> src_frames;
     src_frames.reserve(2 * d->radius + 1);
     for (int i = n - d->radius; i <= n + d->radius; i++) {
         src_frames.emplace_back(
@@ -580,15 +569,15 @@ static const VSFrameRef *VS_CC DFTTestGetFrame(
     }
 
     auto & src_center_frame = src_frames[d->radius];
-    auto format = vsapi->getFrameFormat(src_center_frame.get());
+    auto format = vsapi->getVideoFrameFormat(src_center_frame.get());
 
-    const VSFrameRef * fr[] {
+    const VSFrame * fr[] {
         d->process[0] ? nullptr : src_center_frame.get(),
         d->process[1] ? nullptr : src_center_frame.get(),
         d->process[2] ? nullptr : src_center_frame.get()
     };
     const int pl[] { 0, 1, 2 };
-    std::unique_ptr<VSFrameRef, decltype(vsapi->freeFrame)> dst_frame {
+    std::unique_ptr<VSFrame, decltype(vsapi->freeFrame)> dst_frame {
         vsapi->newVideoFrame2(format, vi->width, vi->height, fr, pl, src_center_frame.get(), core),
         vsapi->freeFrame
     };
@@ -600,7 +589,7 @@ static const VSFrameRef *VS_CC DFTTestGetFrame(
 
         int width = vsapi->getFrameWidth(src_center_frame.get(), plane);
         int height = vsapi->getFrameHeight(src_center_frame.get(), plane);
-        int stride = vsapi->getStride(src_center_frame.get(), plane) / vi->format->bytesPerSample;
+        int stride = vsapi->getStride(src_center_frame.get(), plane) / vi->format.bytesPerSample;
 
         int padded_size_spatial = (
             calc_pad_size(height, d->block_size, d->block_step) *
@@ -610,11 +599,11 @@ static const VSFrameRef *VS_CC DFTTestGetFrame(
         for (int i = 0; i < 2 * d->radius + 1; i++) {
             auto srcp = vsapi->getReadPtr(src_frames[i].get(), plane);
             reflection_padding(
-                &thread_data.h_padded[(i * padded_size_spatial) * vi->format->bytesPerSample],
+                &thread_data.h_padded[(i * padded_size_spatial) * vi->format.bytesPerSample],
                 srcp,
                 width, height, stride,
                 d->block_size, d->block_step,
-                vi->format->bytesPerSample
+                vi->format.bytesPerSample
             );
         }
 
@@ -630,7 +619,7 @@ static const VSFrameRef *VS_CC DFTTestGetFrame(
 
             auto & stream_data = d->stream_data[ticket];
 
-            int padded_bytes = (2 * d->radius + 1) * padded_size_spatial * vi->format->bytesPerSample;
+            int padded_bytes = (2 * d->radius + 1) * padded_size_spatial * vi->format.bytesPerSample;
             checkError(cuMemcpyHtoDAsync(stream_data.d_padded.data, thread_data.h_padded, padded_bytes, stream_data.stream));
             {
                 void * params[] { &stream_data.d_spatial.data, &stream_data.d_padded.data, &width, &height };
@@ -662,21 +651,21 @@ static const VSFrameRef *VS_CC DFTTestGetFrame(
                 size_t pad_width = calc_pad_size(width, d->block_size, d->block_step);
                 size_t pad_height = calc_pad_size(height, d->block_size, d->block_step);
                 const CUDA_MEMCPY3D config {
-                    .srcXInBytes = (pad_width - width) / 2 * vi->format->bytesPerSample,
+                    .srcXInBytes = (pad_width - width) / 2 * vi->format.bytesPerSample,
                     .srcY = (pad_height - height) / 2,
                     .srcZ = (size_t) d->radius,
                     .srcMemoryType = CU_MEMORYTYPE_DEVICE,
                     .srcDevice = stream_data.d_padded.data,
-                    .srcPitch = pad_width * vi->format->bytesPerSample,
+                    .srcPitch = pad_width * vi->format.bytesPerSample,
                     .srcHeight = pad_height,
-                    .dstXInBytes = (pad_width - width) / 2 * vi->format->bytesPerSample,
+                    .dstXInBytes = (pad_width - width) / 2 * vi->format.bytesPerSample,
                     .dstY = (pad_height - height) / 2,
-                    .dstZ = 0, // vs_bitblt(dstp) copies from the 0-th slice
+                    .dstZ = 0, // vsh::bitblt(dstp) copies from the 0-th slice
                     .dstMemoryType = CU_MEMORYTYPE_HOST,
                     .dstHost = thread_data.h_padded,
-                    .dstPitch = pad_width * vi->format->bytesPerSample,
+                    .dstPitch = pad_width * vi->format.bytesPerSample,
                     .dstHeight = pad_height,
-                    .WidthInBytes = (size_t) width * vi->format->bytesPerSample,
+                    .WidthInBytes = (size_t) width * vi->format.bytesPerSample,
                     .Height = (size_t) height,
                     .Depth = 1
                 };
@@ -699,11 +688,11 @@ static const VSFrameRef *VS_CC DFTTestGetFrame(
         int offset_x = (pad_width - width) / 2;
 
         auto dstp = vsapi->getWritePtr(dst_frame.get(), plane);
-        auto input = &thread_data.h_padded[(offset_y * pad_width + offset_x) * vi->format->bytesPerSample];
-        vs_bitblt(
-            dstp, stride * vi->format->bytesPerSample,
-            input, pad_width * vi->format->bytesPerSample,
-            width * vi->format->bytesPerSample, height
+        auto input = &thread_data.h_padded[(offset_y * pad_width + offset_x) * vi->format.bytesPerSample];
+        vsh::bitblt(
+            dstp, stride * vi->format.bytesPerSample,
+            input, pad_width * vi->format.bytesPerSample,
+            width * vi->format.bytesPerSample, height
         );
     }
 
@@ -748,21 +737,21 @@ static void VS_CC DFTTestCreate(
 
     auto d = std::make_unique<DFTTestData>();
 
-    d->node = vsapi->propGetNode(in, "clip", 0, nullptr);
+    d->node = vsapi->mapGetNode(in, "clip", 0, nullptr);
     node_freer node_freer { vsapi, d->node };
 
     auto set_error = [vsapi, out](const char * error_message) -> void {
-        vsapi->setError(out, error_message);
+        vsapi->mapSetError(out, error_message);
         return ;
     };
 
     auto vi = vsapi->getVideoInfo(d->node);
 
-    auto user_kernel = vsapi->propGetData(in, "kernel", 0, nullptr);
+    auto user_kernel = vsapi->mapGetData(in, "kernel", 0, nullptr);
 
     int error;
 
-    d->radius = int64ToIntS(vsapi->propGetInt(in, "radius", 0, &error));
+    d->radius = vsh::int64ToIntS(vsapi->mapGetInt(in, "radius", 0, &error));
     if (error) {
         d->radius = 0;
     }
@@ -771,7 +760,7 @@ static void VS_CC DFTTestCreate(
         return set_error("\"radius\" must be in [0, 1, 2, 3]");
     }
 
-    d->block_size = int64ToIntS(vsapi->propGetInt(in, "block_size", 0, &error));
+    d->block_size = vsh::int64ToIntS(vsapi->mapGetInt(in, "block_size", 0, &error));
     if (error) {
         d->block_size = 16;
     }
@@ -780,17 +769,17 @@ static void VS_CC DFTTestCreate(
         return set_error("\"block_size\" must be 16");
     }
 
-    d->block_step = int64ToIntS(vsapi->propGetInt(in, "block_step", 0, &error));
+    d->block_step = vsh::int64ToIntS(vsapi->mapGetInt(in, "block_step", 0, &error));
     if (error) {
         d->block_step = d->block_size;
     }
 
-    int num_planes_args = vsapi->propNumElements(in, "planes");
+    int num_planes_args = vsapi->mapNumElements(in, "planes");
     d->process.fill(num_planes_args <= 0);
     for (int i = 0; i < num_planes_args; ++i) {
-        int plane = static_cast<int>(vsapi->propGetInt(in, "planes", i, nullptr));
+        int plane = static_cast<int>(vsapi->mapGetInt(in, "planes", i, nullptr));
 
-        if (plane < 0 || plane >= vi->format->numPlanes) {
+        if (plane < 0 || plane >= vi->format.numPlanes) {
             return set_error("plane index out of range");
         }
 
@@ -801,7 +790,7 @@ static void VS_CC DFTTestCreate(
         d->process[plane] = true;
     }
 
-    d->in_place = !!(vsapi->propGetInt(in, "in_place", 0, &error));
+    d->in_place = !!(vsapi->mapGetInt(in, "in_place", 0, &error));
     if (error) {
         d->in_place = true;
     }
@@ -809,12 +798,12 @@ static void VS_CC DFTTestCreate(
         return set_error("\"in_place\" not supported yet");
     }
 
-    int device_id = int64ToIntS(vsapi->propGetInt(in, "device_id", 0, &error));
+    int device_id = vsh::int64ToIntS(vsapi->mapGetInt(in, "device_id", 0, &error));
     if (error) {
         device_id = 0;
     }
 
-    int num_streams = int64ToIntS(vsapi->propGetInt(in, "num_streams", 0, &error));
+    int num_streams = vsh::int64ToIntS(vsapi->mapGetInt(in, "num_streams", 0, &error));
     if (error) {
         num_streams = 1;
     }
@@ -841,12 +830,12 @@ static void VS_CC DFTTestCreate(
         d->device,
         d->radius, d->block_size, d->block_step, d->in_place,
         d->warp_size, d->warps_per_block,
-        vi->format->sampleType, vi->format->bitsPerSample
+        vi->format.sampleType, vi->format.bitsPerSample
     );
     if (std::holds_alternative<std::string>(compilation)) {
         std::ostringstream message;
         message << '[' << __LINE__ << "] compile(): " << std::get<std::string>(compilation);
-        vsapi->setError(out, message.str().c_str());
+        vsapi->mapSetError(out, message.str().c_str());
         return ;
     }
     d->module = std::get<CUmodule>(compilation);
@@ -883,7 +872,7 @@ static void VS_CC DFTTestCreate(
             (2 * d->radius + 1) *
             calc_pad_size(vi->height, d->block_size, d->block_step) *
             calc_pad_size(vi->width, d->block_size, d->block_step) *
-            vi->format->bytesPerSample
+            vi->format.bytesPerSample
         );
         checkError(cuMemAlloc(&stream_data.d_padded.data, padded_bytes));
 
@@ -900,14 +889,15 @@ static void VS_CC DFTTestCreate(
     }
 
     VSCoreInfo info;
-    vsapi->getCoreInfo2(core, &info);
+    vsapi->getCoreInfo(core, &info);
     d->num_uninitialized_threads.store(info.numThreads, std::memory_order_relaxed);
     d->thread_data.reserve(info.numThreads);
 
-    vsapi->createFilter(
-        in, out, "DFTTest",
-        DFTTestInit, DFTTestGetFrame, DFTTestFree,
-        fmParallel, 0, d.release(), core
+    VSFilterDependency deps[] = {{d->node, rpGeneral}};
+    vsapi->createVideoFilter(
+        out, "DFTTest", vi,
+        DFTTestGetFrame, DFTTestFree,
+        fmParallel, deps, 1, d.release(), core
     );
 
     node_freer.release();
@@ -920,19 +910,19 @@ static void VS_CC RDFT(
 ) noexcept {
 
     auto set_error = [vsapi, out](const char * error_message) -> void {
-        vsapi->setError(out, error_message);
+        vsapi->mapSetError(out, error_message);
     };
 
-    int ndim = vsapi->propNumElements(in, "shape");
+    int ndim = vsapi->mapNumElements(in, "shape");
     if (ndim != 1 && ndim != 2 && ndim != 3) {
         return set_error("\"shape\" must be an array of ints with 1, 2 or 3 values");
     }
 
     std::array<int, 3> shape {};
     {
-        auto shape_array = vsapi->propGetIntArray(in, "shape", nullptr);
+        auto shape_array = vsapi->mapGetIntArray(in, "shape", nullptr);
         for (int i = 0; i < ndim; i++) {
-            shape[i] = int64ToIntS(shape_array[i]);
+            shape[i] = vsh::int64ToIntS(shape_array[i]);
         }
     }
 
@@ -940,7 +930,7 @@ static void VS_CC RDFT(
     for (int i = 0; i < ndim; i++) {
         size *= shape[i];
     }
-    if (vsapi->propNumElements(in, "data") != size) {
+    if (vsapi->mapNumElements(in, "data") != size) {
         return set_error("cannot reshape array");
     }
 
@@ -949,13 +939,13 @@ static void VS_CC RDFT(
         complex_size *= shape[i];
     }
 
-    auto input = vsapi->propGetFloatArray(in, "data", nullptr);
+    auto input = vsapi->mapGetFloatArray(in, "data", nullptr);
 
     auto output = std::make_unique<std::complex<double> []>(complex_size);
 
     if (ndim == 1) {
         dft(output.get(), input, size, 1);
-        vsapi->propSetFloatArray(out, "ret", (const double *) output.get(), complex_size * 2);
+        vsapi->mapSetFloatArray(out, "ret", (const double *) output.get(), complex_size * 2);
     } else if (ndim == 2) {
         for (int i = 0; i < shape[0]; i++) {
             dft(&output[i * (shape[1] / 2 + 1)], &input[i * shape[1]], shape[1], 1);
@@ -967,7 +957,7 @@ static void VS_CC RDFT(
             dft(&output2[i], &output[i], shape[0], shape[1] / 2 + 1);
         }
 
-        vsapi->propSetFloatArray(out, "ret", (const double *) output2.get(), complex_size * 2);
+        vsapi->mapSetFloatArray(out, "ret", (const double *) output2.get(), complex_size * 2);
     } else {
         for (int i = 0; i < shape[0] * shape[1]; i++) {
             dft(&output[i * (shape[2] / 2 + 1)], &input[i * shape[2]], shape[2], 1);
@@ -990,7 +980,7 @@ static void VS_CC RDFT(
             dft(&output[i], &output2[i], shape[0], shape[1] * (shape[2] / 2 + 1));
         }
 
-        vsapi->propSetFloatArray(out, "ret", (const double *) output.get(), complex_size * 2);
+        vsapi->mapSetFloatArray(out, "ret", (const double *) output.get(), complex_size * 2);
     }
 }
 
@@ -999,8 +989,8 @@ static void VS_CC ToSingle(
     VSCore *core, const VSAPI *vsapi
 ) noexcept {
 
-    auto data = vsapi->propGetFloatArray(in, "data", nullptr);
-    int num = vsapi->propNumElements(in, "data");
+    auto data = vsapi->mapGetFloatArray(in, "data", nullptr);
+    int num = vsapi->mapNumElements(in, "data");
 
     auto converted_data = std::make_unique<double []>(num);
     for (int i = 0; i < num; i++) {
@@ -1008,28 +998,28 @@ static void VS_CC ToSingle(
     }
 
     if (num == 1) {
-        vsapi->propSetFloat(out, "ret", converted_data[0], paReplace);
+        vsapi->mapSetFloat(out, "ret", converted_data[0], maReplace);
     } else {
-        vsapi->propSetFloatArray(out, "ret", converted_data.get(), num);
+        vsapi->mapSetFloatArray(out, "ret", converted_data.get(), num);
     }
 }
 
 static void Version(const VSMap *, VSMap * out, void *, VSCore *, const VSAPI *vsapi) {
-    vsapi->propSetData(out, "version", VERSION, -1, paReplace);
+    vsapi->mapSetData(out, "version", VERSION, -1, dtUtf8, maReplace);
 };
 
 VS_EXTERNAL_API(void)
-VapourSynthPluginInit(VSConfigPlugin configFunc, VSRegisterFunction registerFunc, VSPlugin *plugin) {
-    configFunc(
+VapourSynthPluginInit2(VSPlugin *plugin, const VSPLUGINAPI *vspapi) {
+    vspapi->configPlugin(
         "io.github.amusementclub.dfttest2_nvrtc",
         "dfttest2_nvrtc",
         "DFTTest2 (NVRTC)",
-        VAPOURSYNTH_API_VERSION, 1, plugin
+        VS_MAKE_VERSION(10, 0), VAPOURSYNTH_API_VERSION, 0, plugin
     );
 
-    registerFunc(
+    vspapi->registerFunction(
         "DFTTest",
-        "clip:clip;"
+        "clip:vnode;"
         "kernel:data[];"
         "radius:int:opt;"
         "block_size:int:opt;"
@@ -1038,25 +1028,29 @@ VapourSynthPluginInit(VSConfigPlugin configFunc, VSRegisterFunction registerFunc
         "in_place:int:opt;"
         "device_id:int:opt;"
         "num_streams:int:opt;",
+        "clip:vnode;",
         DFTTestCreate, nullptr, plugin
     );
 
-    registerFunc(
+    vspapi->registerFunction(
         "RDFT",
         "data:float[];"
         "shape:int[];",
+        "ret:float[];",
         RDFT, nullptr, plugin
     );
 
-    registerFunc(
+    vspapi->registerFunction(
         "ToSingle",
         "data:float[];",
+        "ret:float[];",
         ToSingle, nullptr, plugin
     );
 
-    registerFunc(
+    vspapi->registerFunction(
         "Version",
         "",
+        "version:data;",
         Version, nullptr, plugin
     );
 }

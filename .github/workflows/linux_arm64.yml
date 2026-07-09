@@ -1,13 +1,6 @@
 name: Build (Linux, ARM64)
 
 on:
-  push:
-    paths:
-      - 'CMakeLists.txt'
-      - 'gcc_source/*'
-      - 'cuda_source/*'
-      - 'nvrtc_source/*'
-      - '.github/workflows/linux_arm64.yml'
   workflow_dispatch:
 
 jobs:

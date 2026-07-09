@@ -1,11 +1,6 @@
 name: Build (Windows, ARM64)
 
 on:
-  push:
-    paths:
-      - 'CMakeLists.txt'
-      - 'cpu_source/*'
-      - '.github/workflows/windows_arm64.yml'
   workflow_dispatch:
     inputs:
       tag:

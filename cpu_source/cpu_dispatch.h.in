@@ -3,7 +3,7 @@
 #ifndef CPU_DISPATCH_H
 #define CPU_DISPATCH_H
 
-#include <VapourSynth.h>
+#include <VapourSynth4.h>
 
 @GETFRAME_DECLARATIONS@
 

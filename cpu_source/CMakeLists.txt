@@ -20,10 +20,10 @@ target_include_directories(dfttest2_cpu PRIVATE ${VCL_HOME})
 
 if(PKG_CONFIG_FOUND AND VS_FOUND)
     target_include_directories(dfttest2_cpu PRIVATE ${VS_INCLUDE_DIRS})
-    install(TARGETS dfttest2_cpu LIBRARY DESTINATION ${install_dir})
+    install(TARGETS dfttest2_cpu LIBRARY DESTINATION ${install_dir} RUNTIME DESTINATION ${install_dir})
 else()
     target_include_directories(dfttest2_cpu PRIVATE ${VS_INCLUDE_DIR})
-    install(TARGETS dfttest2_cpu LIBRARY DESTINATION lib)
+    install(TARGETS dfttest2_cpu LIBRARY DESTINATION lib RUNTIME DESTINATION lib)
 endif()
 
 target_include_directories(dfttest2_cpu PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/..)
@@ -90,8 +90,8 @@ if(CPU_DISPATCH_TARGETS)
         target_include_directories(${current_target} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
         string(APPEND GETFRAME_DECLARATIONS "
-        extern const VSFrameRef *VS_CC ${current_getframe_name}(
-            int n, int activationReason, void **instanceData, void **frameData,
+        extern const VSFrame *VS_CC ${current_getframe_name}(
+            int n, int activationReason, void *instanceData, void **frameData,
             VSFrameContext *frameCtx, VSCore *core, const VSAPI *vsapi
         ) noexcept;\n")
 

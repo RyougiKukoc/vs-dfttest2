@@ -1,158 +1,198 @@
-name: Build (Windows)
+name: Build Windows CPU/NVRTC
 
 on:
   push:
+    branches:
+      - master
+    tags:
+      - cu121
+      - cu129
     paths:
-      - 'CMakeLists.txt'
-      - 'cpu_source/*'
-      - 'cuda_source/*'
-      - 'nvrtc_source/*'
-      - '.github/workflows/windows.yml'
+      - "CMakeLists.txt"
+      - "common/**"
+      - "cpu_source/**"
+      - "dfttest2/**"
+      - "dfttest2.py"
+      - "hatch_build.py"
+      - "nvrtc_source/**"
+      - "pyproject.toml"
+      - "tools/**"
+      - ".github/workflows/windows.yml"
+  pull_request:
+    paths:
+      - "CMakeLists.txt"
+      - "common/**"
+      - "cpu_source/**"
+      - "dfttest2/**"
+      - "dfttest2.py"
+      - "hatch_build.py"
+      - "nvrtc_source/**"
+      - "pyproject.toml"
+      - "tools/**"
+      - ".github/workflows/windows.yml"
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'which tag to upload to'
-        default: ''
+      upload_release:
+        description: "Upload artifacts to the cu121 and cu129 releases"
+        default: false
+        type: boolean
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
 
 jobs:
-  build-windows:
+  build:
+    name: Build ${{ matrix.variant }}
     runs-on: windows-2025
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: cu121
+            cuda_version: 12.1.1
+            cuda_component: "12.1"
+            cuda_path: 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1'
+          - variant: cu129
+            cuda_version: 12.9.1
+            cuda_component: "12.9"
+            cuda_path: 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9'
 
     defaults:
       run:
         shell: cmd
 
+    env:
+      CUDA_PATH: ${{ matrix.cuda_path }}
+      DFTTEST2_CUDA_VARIANT: ${{ matrix.variant }}
+
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
-      with:
-        submodules: true
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
 
-    - name: Setup MSVC
-      uses: ilammy/msvc-dev-cmd@v1
+      - name: Set up CPython
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-    - name: Setup Ninja
-      run: pip install ninja
+      - name: Install Python build tools
+        run: >-
+          "%pythonLocation%\python.exe" -m pip install --upgrade pip build hatchling packaging cmake ninja
 
-    - name: Cache CUDA
-      id: cache-cuda
-      uses: actions/cache@v4
-      with:
-        path: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA
-        key: ${{ runner.os }}-cuda-13.0.1
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
 
-    - name: Setup CUDA
-      if: steps.cache-cuda.outputs.cache-hit != 'true'
-      run: |
-        curl -s -o cuda_installer.exe -L https://developer.download.nvidia.com/compute/cuda/13.0.1/network_installers/cuda_13.0.1_windows_network.exe
-        cuda_installer.exe -s nvcc_13.0 cudart_13.0 nvrtc_dev_13.0 cufft_13.0 cufft_dev_13.0 crt_13.0 nvptxcompiler_13.0
+      - name: Cache CUDA
+        id: cache-cuda
+        uses: actions/cache@v4
+        with:
+          path: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA
+          key: ${{ runner.os }}-cuda-${{ matrix.cuda_version }}-dfttest2-static-nvrtc-v1
 
-    - name: Download VapourSynth headers
-      run: |
-        curl -s -o vs.zip -L https://github.com/vapoursynth/vapoursynth/archive/refs/tags/R57.zip
-        unzip -q vs.zip
-        mv vapoursynth-*/ vapoursynth/
+      - name: Install CUDA ${{ matrix.cuda_version }}
+        if: steps.cache-cuda.outputs.cache-hit != 'true'
+        run: |
+          curl.exe -sS -L -o cuda_installer.exe https://developer.download.nvidia.com/compute/cuda/${{ matrix.cuda_version }}/network_installers/cuda_${{ matrix.cuda_version }}_windows_network.exe
+          cuda_installer.exe -s nvcc_${{ matrix.cuda_component }} cudart_${{ matrix.cuda_component }} crt_${{ matrix.cuda_component }} nvrtc_${{ matrix.cuda_component }} nvrtc_dev_${{ matrix.cuda_component }} nvptxcompiler_${{ matrix.cuda_component }} nvjitlink_${{ matrix.cuda_component }}
 
-    - name: Configure (CUDA)
-      run: cmake -S . -B build_cuda -G Ninja -LA
-        -D CMAKE_BUILD_TYPE=Release
-        -D ENABLE_CUDA=ON
-        -D USE_NVRTC_STATIC=ON
-        -D ENABLE_CPU=OFF
-        -D VS_INCLUDE_DIR="%cd%\vapoursynth\include"
-        -D CMAKE_CXX_FLAGS="/fp:fast /EHsc"
-        -D CMAKE_SHARED_LINKER_FLAGS="/DELAYLOAD:cufft64_12.dll"
-        -D CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
-      env:
-        CUDA_PATH: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.0
+      - name: Add CUDA to PATH
+        run: |
+          echo %CUDA_PATH%\bin>>"%GITHUB_PATH%"
+          echo %CUDA_PATH%\bin\x64>>"%GITHUB_PATH%"
 
-    - name: Build (CUDA)
-      run: cmake --build build_cuda --verbose
+      - name: Prepare VapourSynth R77 wheel
+        run: >-
+          "%pythonLocation%\python.exe" tools\ci_prepare_windows.py
 
-    - name: Install (CUDA)
-      run: cmake --install build_cuda --prefix install_cuda
+      - name: Build package directory
+        run: >-
+          "%pythonLocation%\python.exe" tools\ci_build_windows.py
+          --clean
+          --variant ${{ matrix.variant }}
+          --dist-dir dist\windows-${{ matrix.variant }}
 
-    - name: Prepare for upload (CUDA)
-      run: |
-        mkdir artifact_cuda
-        copy install_cuda\lib\*.dll artifact_cuda
-        mkdir cufft
-        copy "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.0\bin\x64\cufft64_*.dll" cufft
+      - name: Smoke-load explicit package
+        run: >-
+          "%pythonLocation%\python.exe" tools\smoke_load_artifact.py
+          --vapoursynth-root _deps\vapoursynth-wheel-R77
+          --artifact-dir dist\windows-${{ matrix.variant }}
+          --exercise-cpu-filter
 
-    - name: Upload (CUDA)
-      uses: actions/upload-artifact@v4
-      with:
-        name: vs-dfttest2-cuda-windows
-        path: artifact_cuda
+      - name: Smoke-load package through manifest autoload
+        run: >-
+          "%pythonLocation%\python.exe" tools\smoke_load_artifact.py
+          --vapoursynth-root _deps\vapoursynth-wheel-R77
+          --artifact-dir dist\windows-${{ matrix.variant }}
+          --autoload
+          --exercise-cpu-filter
 
-    - name: Upload cufft
-      uses: actions/upload-artifact@v4
-      if: false
-      with:
-        name: cufft-windows
-        path: cufft
+      - name: Pack release zip
+        run: >-
+          "%pythonLocation%\python.exe" tools\package_plugin_zip.py
+          --input-dir dist\windows-${{ matrix.variant }}
+          --output dist\dfttest2-${{ matrix.variant }}-win64.zip
 
-    - name: Configure (CPU)
-      shell: bash
-      run: cmake -S . -B build_cpu -G Ninja -LA
-        -D CMAKE_BUILD_TYPE=Release
-        -D ENABLE_CUDA=OFF
-        -D ENABLE_CPU=ON
-        -D VS_INCLUDE_DIR="$(pwd)/vapoursynth/include"
-        -D CMAKE_CXX_COMPILER=clang++
-        -D CMAKE_CXX_FLAGS="-ffast-math"
-        -D CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+      - name: Build wheel from local prebuilt package
+        env:
+          DFTTEST2_PREBUILT_URL: ${{ github.workspace }}\dist\dfttest2-${{ matrix.variant }}-win64.zip
+        run: >-
+          "%pythonLocation%\python.exe" -m build --wheel --no-isolation --outdir dist\wheels-${{ matrix.variant }}
 
-    - name: Build (CPU)
-      run: cmake --build build_cpu --verbose
+      - name: Install built wheel
+        run: >-
+          for %%I in (dist\wheels-${{ matrix.variant }}\*.whl) do "%pythonLocation%\python.exe" -m pip install --force-reinstall "%%~fI"
 
-    - name: Install (CPU)
-      run: cmake --install build_cpu --prefix install_cpu
+      - name: Smoke test installed wheel
+        run: >-
+          "%pythonLocation%\python.exe" tools\smoke_installed_wheel.py --exercise-cpu-filter
 
-    - name: Prepare for upload (CPU)
-      run: |
-        mkdir artifact_cpu
-        copy install_cpu\lib\*.dll artifact_cpu
+      - name: Smoke test source install with prebuilt package
+        env:
+          DFTTEST2_PREBUILT_URL: ${{ github.workspace }}\dist\dfttest2-${{ matrix.variant }}-win64.zip
+        run: |
+          "%pythonLocation%\python.exe" -m pip uninstall -y vapoursynth-dfttest2
+          "%pythonLocation%\python.exe" -m pip install --force-reinstall --no-deps --no-build-isolation -v .
+          "%pythonLocation%\python.exe" tools\smoke_installed_wheel.py --exercise-cpu-filter
 
-    - name: Upload (CPU)
-      uses: actions/upload-artifact@v4
-      with:
-        name: vs-dfttest2-cpu-windows
-        path: artifact_cpu
+      - name: Upload package directory
+        uses: actions/upload-artifact@v4
+        with:
+          name: dfttest2-${{ matrix.variant }}-package
+          path: dist/windows-${{ matrix.variant }}
 
-    - name: Compress artifact for release
-      if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
-      run: |
-        cd artifact_cuda
+      - name: Upload release zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dfttest2-${{ matrix.variant }}-release-zip
+          path: dist/dfttest2-${{ matrix.variant }}-win64.zip
 
-        mkdir vs-dfttest2-cuda-windows-${{ github.event.inputs.tag }}
-        xcopy dfttest2_cuda.dll vs-dfttest2-cuda-windows-${{ github.event.inputs.tag }} /f
-        xcopy dfttest2_nvrtc.dll vs-dfttest2-cuda-windows-${{ github.event.inputs.tag }} /f
-        7z a -t7z -mx=9 ../vs-dfttest2-cuda-windows-${{ github.event.inputs.tag }}.7z vs-dfttest2-cuda-windows-${{ github.event.inputs.tag }}
-        
-        cd ../cufft
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dfttest2-${{ matrix.variant }}-wheel-win64
+          path: dist/wheels-${{ matrix.variant }}
 
-        mkdir vsmlrt-cuda
-        xcopy cufft64_*.dll vsmlrt-cuda /f
-        7z a -t7z -mx=9 ../cufft-windows-${{ github.event.inputs.tag }}.7z vsmlrt-cuda
-        
-        cd ../artifact_cpu
-
-        mkdir vs-dfttest2-cpu-windows-${{ github.event.inputs.tag }}
-        xcopy dfttest2_cpu.dll vs-dfttest2-cpu-windows-${{ github.event.inputs.tag }} /f
-        7z a -t7z -mx=9 ../vs-dfttest2-cpu-windows-${{ github.event.inputs.tag }}.7z vs-dfttest2-cpu-windows-${{ github.event.inputs.tag }}
-
-    - name: Release
-      uses: softprops/action-gh-release@v2
-      if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
-      with:
-        tag_name: ${{ github.event.inputs.tag }}
-        files: |
-          vs-dfttest2-cuda-windows-${{ github.event.inputs.tag }}.7z
-          vs-dfttest2-cpu-windows-${{ github.event.inputs.tag }}.7z
-          cufft-windows-${{ github.event.inputs.tag }}.7z
-          dfttest2.py
-        fail_on_unmatched_files: true
-        generate_release_notes: false
-        prerelease: true
-
+      - name: Upload release assets
+        if: |
+          (startsWith(github.ref, 'refs/tags/') && github.ref_name == matrix.variant) ||
+          (github.event_name == 'release' && github.event.release.tag_name == matrix.variant) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.upload_release == 'true')
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ matrix.variant }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          $assets = @("dist\dfttest2-${{ matrix.variant }}-win64.zip")
+          $assets += Get-ChildItem "dist\wheels-${{ matrix.variant }}\*.whl" | Select-Object -ExpandProperty FullName
+          & cmd.exe /d /c "gh release view $tag --repo $env:GITHUB_REPOSITORY >NUL 2>NUL"
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $assets --clobber --repo $env:GITHUB_REPOSITORY
+          } else {
+            gh release create $tag $assets --title $tag --notes "Automated DFTTest2 ${{ matrix.variant }} static NVRTC build." --repo $env:GITHUB_REPOSITORY
+          }
