@@ -58,13 +58,13 @@ def main(argv: list[str]) -> int:
     plugin_dir = vs_pkg / "plugins" / PLUGIN_NAME
     required = [
         plugin_dir / "dfttest2_cpu.dll",
-        plugin_dir / "dfttest2_nvrtc.dll",
         plugin_dir / "manifest.vs",
     ]
     for path in required:
         if not path.exists():
             print(f"missing installed file: {path}", file=sys.stderr)
             return 1
+    has_nvrtc = (plugin_dir / "dfttest2_nvrtc.dll").exists()
 
     cuda_path = os.environ.get("CUDA_PATH")
     cuda_dirs = []
@@ -89,11 +89,12 @@ def main(argv: list[str]) -> int:
     if not hasattr(core, "dfttest2_cpu") or not hasattr(core.dfttest2_cpu, "DFTTest"):
         print("core.dfttest2_cpu.DFTTest missing after installed-wheel autoload", file=sys.stderr)
         return 1
-    if not hasattr(core, "dfttest2_nvrtc") or not hasattr(core.dfttest2_nvrtc, "DFTTest"):
+    if has_nvrtc and (not hasattr(core, "dfttest2_nvrtc") or not hasattr(core.dfttest2_nvrtc, "DFTTest")):
         print("core.dfttest2_nvrtc.DFTTest missing after installed-wheel autoload", file=sys.stderr)
         return 1
     print(core.dfttest2_cpu.DFTTest)
-    print(core.dfttest2_nvrtc.DFTTest)
+    if has_nvrtc:
+        print(core.dfttest2_nvrtc.DFTTest)
 
     if args.exercise_cpu_filter:
         try:

@@ -19,7 +19,8 @@ from packaging import tags
 ROOT = Path(__file__).resolve().parent
 PLUGIN_NAME = "dfttest2"
 DEFAULT_REPOSITORY = "RyougiKukoc/vs-dfttest2"
-SUPPORTED_VARIANTS = {"cu121", "cu129"}
+CUDA_VARIANTS = {"cu121", "cu129"}
+SUPPORTED_VARIANTS = {"cpu", *CUDA_VARIANTS}
 
 
 def _truthy(value: str | None) -> bool:
@@ -60,7 +61,7 @@ def _default_repository() -> str:
 
 
 def _variant_from_environment() -> str | None:
-    for name in ("DFTTEST2_CUDA_VARIANT", "GITHUB_REF_NAME"):
+    for name in ("DFTTEST2_VARIANT", "DFTTEST2_CUDA_VARIANT", "GITHUB_REF_NAME"):
         value = os.environ.get(name)
         if value in SUPPORTED_VARIANTS:
             return value
@@ -85,7 +86,7 @@ def _variant_from_git() -> str | None:
 def _selected_variant() -> str:
     variant = _variant_from_environment() or _variant_from_git() or "cu121"
     if variant not in SUPPORTED_VARIANTS:
-        raise RuntimeError(f"unsupported DFTTEST2 CUDA variant {variant!r}; expected one of {sorted(SUPPORTED_VARIANTS)}")
+        raise RuntimeError(f"unsupported DFTTEST2 variant {variant!r}; expected one of {sorted(SUPPORTED_VARIANTS)}")
     return variant
 
 
@@ -122,7 +123,7 @@ def _fetch_prebuilt_archive(source: str, destination: Path) -> None:
         shutil.copyfileobj(response, handle)
 
 
-def _stage_package_from_zip(archive_path: Path, target_dir: Path) -> None:
+def _stage_package_from_zip(archive_path: Path, target_dir: Path, variant: str) -> None:
     with zipfile.ZipFile(archive_path) as zf:
         package_members = [
             name
@@ -143,11 +144,19 @@ def _stage_package_from_zip(archive_path: Path, target_dir: Path) -> None:
     required = [
         target_dir / "manifest.vs",
         target_dir / "dfttest2_cpu.dll",
-        target_dir / "dfttest2_nvrtc.dll",
     ]
+    if variant in CUDA_VARIANTS:
+        required.append(target_dir / "dfttest2_nvrtc.dll")
     for path in required:
         if not path.exists():
             raise FileNotFoundError(f"prebuilt archive did not provide {path.name}")
+
+    manifest_text = (target_dir / "manifest.vs").read_text(encoding="ascii", errors="ignore")
+    if variant == "cpu":
+        if (target_dir / "dfttest2_nvrtc.dll").exists():
+            raise RuntimeError("cpu prebuilt archive unexpectedly contains dfttest2_nvrtc.dll")
+        if "dfttest2_nvrtc" in manifest_text:
+            raise RuntimeError("cpu prebuilt archive manifest unexpectedly lists dfttest2_nvrtc")
 
 
 def _stage_prebuilt_plugin(variant: str, target_dir: Path) -> bool:
@@ -164,7 +173,7 @@ def _stage_prebuilt_plugin(variant: str, target_dir: Path) -> bool:
         with tempfile.TemporaryDirectory(prefix="dfttest2-prebuilt-") as temp_dir_text:
             archive_path = Path(temp_dir_text) / asset_name
             _fetch_prebuilt_archive(source, archive_path)
-            _stage_package_from_zip(archive_path, target_dir)
+            _stage_package_from_zip(archive_path, target_dir, variant)
     except Exception as exc:
         if explicit:
             raise RuntimeError(f"failed to use explicit DFTTest2 prebuilt asset {source!r}") from exc
@@ -199,8 +208,14 @@ def _stage_local_build(variant: str, target_dir: Path) -> None:
         ],
         env=env,
     )
-    if not (target_dir / "dfttest2_cpu.dll").exists() or not (target_dir / "dfttest2_nvrtc.dll").exists():
-        raise FileNotFoundError(target_dir / "dfttest2_nvrtc.dll")
+    required = [target_dir / "dfttest2_cpu.dll"]
+    if variant in CUDA_VARIANTS:
+        required.append(target_dir / "dfttest2_nvrtc.dll")
+    for path in required:
+        if not path.exists():
+            raise FileNotFoundError(path)
+    if variant == "cpu" and (target_dir / "dfttest2_nvrtc.dll").exists():
+        raise RuntimeError(f"cpu local build unexpectedly staged {target_dir / 'dfttest2_nvrtc.dll'}")
 
 
 class CustomHook(BuildHookInterface[Any]):

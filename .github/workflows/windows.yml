@@ -5,6 +5,7 @@ on:
     branches:
       - master
     tags:
+      - cpu
       - cu121
       - cu129
     paths:
@@ -33,7 +34,7 @@ on:
   workflow_dispatch:
     inputs:
       upload_release:
-        description: "Upload artifacts to the cu121 and cu129 releases"
+        description: "Upload artifacts to the cpu, cu121, and cu129 releases"
         default: false
         type: boolean
   release:
@@ -52,7 +53,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - variant: cpu
+            cuda_enabled: false
+            cuda_version: ""
+            cudart_version: ""
+            nvrtc_version: ""
+            nvcc_version: ""
+            nvjitlink_version: ""
+            extra_cuda_packages: ""
           - variant: cu121
+            cuda_enabled: true
             cuda_version: 12.1.1
             cudart_version: 12.1.105
             nvrtc_version: 12.1.105
@@ -60,6 +70,7 @@ jobs:
             nvjitlink_version: 12.1.105
             extra_cuda_packages: ""
           - variant: cu129
+            cuda_enabled: true
             cuda_version: 12.9.1
             cudart_version: 12.9.79
             nvrtc_version: 12.9.86
@@ -72,6 +83,7 @@ jobs:
         shell: cmd
 
     env:
+      DFTTEST2_VARIANT: ${{ matrix.variant }}
       DFTTEST2_CUDA_VARIANT: ${{ matrix.variant }}
 
     steps:
@@ -92,7 +104,8 @@ jobs:
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install CUDA ${{ matrix.cuda_version }} static packages
+      - name: Install CUDA static packages
+        if: ${{ matrix.cuda_enabled }}
         id: cuda
         uses: mamba-org/setup-micromamba@v3
         with:
@@ -116,6 +129,7 @@ jobs:
             ${{ matrix.extra_cuda_packages }}
 
       - name: Show CUDA package layout
+        if: ${{ matrix.cuda_enabled }}
         run: |
           set "CUDA_ROOT=${{ steps.cuda.outputs.environment-path }}\Library"
           echo CUDA_ROOT=%CUDA_ROOT%
@@ -129,7 +143,16 @@ jobs:
         run: >-
           "%pythonLocation%\python.exe" tools\ci_prepare_windows.py
 
-      - name: Build package directory
+      - name: Build CPU-only package directory
+        if: ${{ !matrix.cuda_enabled }}
+        run: >-
+          "%pythonLocation%\python.exe" tools\ci_build_windows.py
+          --clean
+          --variant ${{ matrix.variant }}
+          --dist-dir dist\windows-${{ matrix.variant }}
+
+      - name: Build CPU/NVRTC package directory
+        if: ${{ matrix.cuda_enabled }}
         run: >-
           "%pythonLocation%\python.exe" tools\ci_build_windows.py
           --clean
@@ -155,6 +178,7 @@ jobs:
       - name: Pack release zip
         run: >-
           "%pythonLocation%\python.exe" tools\package_plugin_zip.py
+          --variant ${{ matrix.variant }}
           --input-dir dist\windows-${{ matrix.variant }}
           --output dist\dfttest2-${{ matrix.variant }}-win64.zip
 
@@ -215,5 +239,5 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $assets --clobber --repo $env:GITHUB_REPOSITORY
           } else {
-            gh release create $tag $assets --title $tag --notes "Automated DFTTest2 ${{ matrix.variant }} static NVRTC build." --repo $env:GITHUB_REPOSITORY
+            gh release create $tag $assets --title $tag --notes "Automated DFTTest2 ${{ matrix.variant }} Windows build." --repo $env:GITHUB_REPOSITORY
           }

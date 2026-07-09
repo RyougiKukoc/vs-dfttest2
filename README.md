@@ -1,24 +1,26 @@
 # vs-dfttest2
 DFTTest re-implementation for VapourSynth API4.
 
-This fork packages the CPU backend and the static-NVRTC backend. The old cuFFT,
-HIP, HIPRTC, and GCC backend sources are kept in the repository, but they are
-not part of the default Windows package.
+This fork packages the CPU backend and, for CUDA-tagged builds, the
+static-NVRTC backend. The old cuFFT, HIP, HIPRTC, and GCC backend sources are
+kept in the repository, but they are not part of the default Windows package.
 
 ## Installation
 
-The Windows VCS install path is release-backed. Pick the CUDA runtime family by
+The Windows VCS install path is release-backed. Pick the package variant by
 installing from one of the repository tags:
 
 ```powershell
+pip install "vapoursynth-dfttest2 @ git+https://github.com/RyougiKukoc/vs-dfttest2.git@cpu"
 pip install "vapoursynth-dfttest2 @ git+https://github.com/RyougiKukoc/vs-dfttest2.git@cu121"
 pip install "vapoursynth-dfttest2 @ git+https://github.com/RyougiKukoc/vs-dfttest2.git@cu129"
 ```
 
-`cu121` is built with CUDA 12.1 static NVRTC libraries. `cu129` is built with
-CUDA 12.9 static NVRTC libraries. If you switch between the two tags, use
-`--force-reinstall` so pip replaces the already-installed wheel with the other
-variant.
+`cpu` installs only `dfttest2_cpu.dll`. `cu121` installs `dfttest2_cpu.dll`
+plus a CUDA 12.1 static-NVRTC `dfttest2_nvrtc.dll`. `cu129` installs
+`dfttest2_cpu.dll` plus a CUDA 12.9 static-NVRTC `dfttest2_nvrtc.dll`. If you
+switch between tags, use `--force-reinstall` so pip replaces the
+already-installed wheel with the other variant.
 
 ## Usage
 
@@ -47,6 +49,6 @@ cmake --build build
 ```
 
 For reproducible release packages, use the GitHub Actions workflow. It builds
-and smoke-tests CUDA 12.1 and CUDA 12.9 variants separately, then uploads
-`dfttest2-cu121-win64.zip` or `dfttest2-cu129-win64.zip` to the matching
-release tag.
+and smoke-tests the CPU-only, CUDA 12.1, and CUDA 12.9 variants separately,
+then uploads `dfttest2-cpu-win64.zip`, `dfttest2-cu121-win64.zip`, or
+`dfttest2-cu129-win64.zip` to the matching release tag.

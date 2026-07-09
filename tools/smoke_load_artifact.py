@@ -36,9 +36,9 @@ def resolve_artifact(root: Path) -> Path:
         root / "vapoursynth" / "plugins" / PLUGIN_NAME,
     ]
     for candidate in candidates:
-        if (candidate / "dfttest2_cpu.dll").exists() and (candidate / "dfttest2_nvrtc.dll").exists():
+        if (candidate / "dfttest2_cpu.dll").exists():
             return candidate
-    raise FileNotFoundError(root / PLUGIN_NAME / "dfttest2_nvrtc.dll")
+    raise FileNotFoundError(root / PLUGIN_NAME / "dfttest2_cpu.dll")
 
 
 def add_existing_dll_dirs(paths: list[Path]) -> None:
@@ -123,13 +123,13 @@ def main(argv: list[str]) -> int:
 
     required = [
         artifact / "dfttest2_cpu.dll",
-        artifact / "dfttest2_nvrtc.dll",
         artifact / "manifest.vs",
     ]
     for path in required:
         if not path.exists():
             print(f"missing required path: {path}", file=sys.stderr)
             return 1
+    has_nvrtc = (artifact / "dfttest2_nvrtc.dll").exists()
 
     sys_paths, dll_paths = resolve_vapoursynth_paths(vs_root)
     sys.path.insert(0, str(ROOT))
@@ -173,18 +173,19 @@ def main(argv: list[str]) -> int:
 
     if not args.autoload:
         core.std.LoadPlugin(str(artifact / "dfttest2_cpu.dll"))
-        core.std.LoadPlugin(str(artifact / "dfttest2_nvrtc.dll"))
+        if has_nvrtc:
+            core.std.LoadPlugin(str(artifact / "dfttest2_nvrtc.dll"))
 
-    missing = [
-        name
-        for name in ("dfttest2_cpu", "dfttest2_nvrtc")
-        if not has_filter(core, name, "DFTTest")
-    ]
+    expected_namespaces = ["dfttest2_cpu"]
+    if has_nvrtc:
+        expected_namespaces.append("dfttest2_nvrtc")
+    missing = [name for name in expected_namespaces if not has_filter(core, name, "DFTTest")]
     if missing:
         print(f"missing plugin namespaces after loading artifact: {missing}", file=sys.stderr)
         return 1
     print(core.dfttest2_cpu.DFTTest)
-    print(core.dfttest2_nvrtc.DFTTest)
+    if has_nvrtc:
+        print(core.dfttest2_nvrtc.DFTTest)
 
     if args.exercise_cpu_filter:
         try:
