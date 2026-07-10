@@ -1,4 +1,4 @@
-# vs-dfttest2
+# vs-dfttest2-api4
 DFTTest re-implementation for VapourSynth API4.
 
 This fork packages the CPU backend and, for CUDA-tagged builds, the
@@ -11,9 +11,9 @@ The Windows VCS install path is release-backed. Pick the package variant by
 installing from one of the repository tags:
 
 ```powershell
-pip install "vapoursynth-dfttest2 @ git+https://github.com/RyougiKukoc/vs-dfttest2.git@cpu"
-pip install "vapoursynth-dfttest2 @ git+https://github.com/RyougiKukoc/vs-dfttest2.git@cu121"
-pip install "vapoursynth-dfttest2 @ git+https://github.com/RyougiKukoc/vs-dfttest2.git@cu129"
+pip install "vapoursynth-dfttest2 @ git+https://github.com/RyougiKukoc/vs-dfttest2-api4.git@cpu"
+pip install "vapoursynth-dfttest2 @ git+https://github.com/RyougiKukoc/vs-dfttest2-api4.git@cu121"
+pip install "vapoursynth-dfttest2 @ git+https://github.com/RyougiKukoc/vs-dfttest2-api4.git@cu129"
 ```
 
 `cpu` installs only `dfttest2_cpu.dll`. `cu121` installs `dfttest2_cpu.dll`

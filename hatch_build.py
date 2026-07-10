@@ -18,7 +18,7 @@ from packaging import tags
 
 ROOT = Path(__file__).resolve().parent
 PLUGIN_NAME = "dfttest2"
-DEFAULT_REPOSITORY = "RyougiKukoc/vs-dfttest2"
+DEFAULT_REPOSITORY = "RyougiKukoc/vs-dfttest2-api4"
 CUDA_VARIANTS = {"cu121", "cu129"}
 SUPPORTED_VARIANTS = {"cpu", *CUDA_VARIANTS}
 
